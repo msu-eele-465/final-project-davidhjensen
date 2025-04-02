@@ -12,17 +12,20 @@ The project I propose essentially is a launchpad for controls concepts: the hard
 
 The hardware consits of a master MSP430FR2355, a slave MSP430FR2310, a brushed DC motor, an encoder, a 4x4 keyad, POTs, an LCD, and heat-beat LEDs.
 
-![sys_arch.jpg](image)
+![image](sys_arch.jpg)
 
 ## Software overview
 
 ### Master
 This will run a state machine used to select modes, send data, and communicated with the slave MSP430.
 
+![Master flowchart](master_flow.jpg)
+
 ### Slave
 This will run the routines to calculate position and velocity, control states, and control outputs, drive the motor, and communicate with the master MSP430.
 
-Discuss, at a high level, a concept of how your code will work. Include a *high-level* flowchart. This is a high-level concept that should concisely communicate the project's concept.
+![Slave flowchart](slave_flow.jpg)
+
 
 ## Testing Procedure
 
