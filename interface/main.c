@@ -49,7 +49,7 @@ void lcd_clear();                                       // INTERNAL
 
 //-- STATE MACHINE
 // STATE:
-        // 0    Something
+        // 0    Main Menu
 int state = 0;
 //----------------------------------------------END SETUP----------------------------------------------
 
@@ -101,18 +101,36 @@ int main(void) {
 
             // OFF
             if (state == 0) {
-                if (key_val == 'D') {
-                    memcpy(&message[0], "match   ", 8);     // update LCD to display "match"
+
+                // start experiment
+                if (key_val == '1') {
+                    // TODO: update LCD
+                    // TODO: send command to slave MSP to start experiment
+                    // TODO: wait for experiment to finish & display results
                     lcd_display_message(message);           // display message
+                    // TODO: send command to slave MSP to idle
+                    state = 0;
+                }
+
+                // command following mode
+                if (key_val == '2') {
+                    state = 1;
+                    // TODO: update LCD
+                    // TODO: send command to slave MSP to start command following
+                    // TODO: sampling timer (reads ADC, updates LCD, sends angle)
                 }
 
             } else if (state == 1) {
                 // logic for inputing window size
-                if ((key_val >= '0') & (key_val <= '9')) {
-
+                if (key_val == '*') {
+                    state = 0;
+                    // TODO: send command to slave MSP to idle
+                    // TODO: stop sampling timer (reads ADC, updates LCD, sends angle)
                 }
             
             } else {
+                // TODO: send command to slave MSP to idle
+                // TODO: stop sampling timer (reads ADC, updates LCD, sends angle)
                 state = 0;
             }
         }
