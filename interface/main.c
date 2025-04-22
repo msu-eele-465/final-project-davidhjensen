@@ -334,11 +334,14 @@ void sendInt(unsigned int data) {
     while (UCB1CTLW0 & UCTXSTP);            // Wait for STOP if needed
     UCB1I2CSA = MSP_ADDR;                   // Slave address
 
-    UCB1TBCNT = 1;                          // Transmit 1 byte
+    UCB1TBCNT = 2;                          // Transmit 2 bytes
     UCB1CTLW0 |= UCTXSTT;                   // Generate START
 
     while (!(UCB1IFG & UCTXIFG0));          // Wait for TX buffer ready
-    UCB1TXBUF = data;                       // Send data
+    UCB1TXBUF = (0xFF00 & data) >> 8;       // First byte
+
+    while (!(UCB1IFG & UCTXIFG0));          // Wait for TX buffer ready
+    UCB1TXBUF = (0xFF & data);       // Second byte
 
     while (UCB1CTLW0 & UCTXSTP);            // Wait for STOP to finish
 }
