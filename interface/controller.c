@@ -19,7 +19,63 @@ void setupPWM();                                // Setup hardware PWM on pin <TO
 int pwm_duty = 0;                               // Global to hold current PWM duty
 
 //-- CONTROL LOOP
+typedef struct {                                // 2-state system with 1 input
+    float A[2][2];  // 2x2 matrix
+    float B[2];     // 2x1 input matrix
+    float x[2];     // current state
+} DiscreteSystem2x1;
+typedef struct {                                // 1-state low-pass filter
+    float a;        // scalar
+    float b;        // scalar
+    float x;        // current state
+} DiscreteLPF;
+float theta1 = 0.0f;            // Adaptive gain 1 (updated by MRAS)
+float theta2 = 0.0f;            // Adaptive gain 2 (updated by MRAS)
+float gamma = 2.0f;             // Adaptation gain
+float Ts = .01;                 // Sampling time
+float y_measured = 0.0f;        // Angle from encoder
+float y_prev = 0.0f;            // Previous angle from encoder
+float v = 0.0f;                 // Velocity from backwards difference
+float v_filtered = 0.0f;        // Filtered velocity
 void setupControl();                            // Setup timer to drive control calculations
+void updateSystems(int);                        // Update all models
+DiscreteSystem2x1 model = {                     // Model
+    .A = {
+        {0.9988f, 0.00975f},
+        {-0.2438f, 0.95f}
+    },
+    .B = {0.001229f, 0.2438f},
+    .x = {0.0f, 0.0f}
+};
+DiscreteSystem2x1 plant = {                     // Plant
+    .A = {
+        {1.0f, 0.009939f},
+        {0.0f, 0.9877f}
+    },
+    .B = {0.0002827f, 0.05643f},
+    .x = {0.0f, 0.0f}
+};
+DiscreteSystem2x1 spt1 = {                      // Theta1 sensitivity partial
+    .A = {
+        {0.9988f, 0.00975f},
+        {-0.2438f, 0.95f}
+    },
+    .B = {0.001229f, 0.2438f},
+    .x = {0.0f, 0.0f}
+};
+DiscreteSystem2x1 spt2 = {                      // Theta2 sensitivity partial
+    .A = {
+        {0.9988f, 0.00975f},
+        {-0.2438f, 0.95f}
+    },
+    .B = {-0.001229f, -0.2438f},
+    .x = {0.0f, 0.0f}
+};
+DiscreteLPF vlpf = {                            // Low-pass velocity filter
+    .a = 0.9048f,
+    .b = 0.09516f,
+    .x = 0.0f
+};
 
 //-- I2C
 void setupI2C();                                // Setup I2C with SCL on P1.3 and SDA on P1.2
@@ -96,6 +152,50 @@ void setupPWM(){
 void setupControl() {
     // TODO: setup timer to drive control updates
 }
+
+void updateSystems(int uc) {
+    // Read actual plant output from encoder (user-defined function)
+    // TODO: convert current angle from encoder
+    v = (y_measured - y_prev) / Ts;         // Derivative
+    y_prev = y_measured;
+
+    // Update velocity low-pass filter
+    vlpf.x = vlpf.a * vlpf.x + vlpf.b * v;
+    v_filtered = vlpf.x;
+
+    // Error signal: e = y_model - y_plant
+    float error = model.x[0] - y_measured;
+
+    // Control signal: u = theta1 * (uc - y) - theta2 * v_filtered
+    float u = theta1 * ((float) uc - y_measured) - theta2 * v_filtered;
+
+    // --- Update Reference Model ---
+    float x1m = model.x[0];
+    float x2m = model.x[1];
+    model.x[0] = model.A[0][0]*x1m + model.A[0][1]*x2m + model.B[0]*uc;
+    model.x[1] = model.A[1][0]*x1m + model.A[1][1]*x2m + model.B[1]*uc;
+
+    // --- Update Sensitivity Model 1 ---
+    float x1s1 = spt1.x[0];
+    float x2s1 = spt1.x[1];
+    float spt1_u = uc - y_measured;
+    spt1.x[0] = spt1.A[0][0]*x1s1 + spt1.A[0][1]*x2s1 + spt1.B[0]*spt1_u;
+    spt1.x[1] = spt1.A[1][0]*x1s1 + spt1.A[1][1]*x2s1 + spt1.B[1]*spt1_u;
+
+    // --- Update Sensitivity Model 2 ---
+    float x1s2 = spt2.x[0];
+    float x2s2 = spt2.x[1];
+    spt2.x[0] = spt2.A[0][0]*x1s2 + spt2.A[0][1]*x2s2 + spt2.B[0]*v_filtered;
+    spt2.x[1] = spt2.A[1][0]*x1s2 + spt2.A[1][1]*x2s2 + spt2.B[1]*v_filtered;
+
+    // --- Update Adaptive Parameters (MIT Rule) ---
+    theta1 -= gamma * spt1.x[0] * error;
+    theta2 -= gamma * spt2.x[0] * error;
+
+    // Apply control signal to motor (user-defined function)
+    // TODO: PWM duty to motors
+}
+
     // TODO: add ISR for timer where control output is calculated and states are updated.
 
 //-- I2C
