@@ -27,8 +27,9 @@ void disableSampleClock();                  // Disable sampling clock interrupts
 
 //-- I2C MASTER
 volatile uint8_t rx_byte_count = 0;         // Number of bytes received
-volatile uint8_t rx_data[19];               // Array to hold received bytes
+volatile uint8_t rx_data[100];              // Array to hold received bytes
 void setupI2C();                            // Setup I2C on P4.6 (SDA) and P4.7 (SCL)
+void sendInt(unsigned int);                // Send an integer passed as a char to the function to slave MSP 
 
 //-- SLAVE MSP (I2C INFO + vars?)
 #define MSP_ADDR  0x68
@@ -320,10 +321,26 @@ void setupI2C(){
     UCB1TBCNT = 2;                  // Expect 2 bytes
     UCB1I2CSA = MSP_ADDR;           // RTC address
 
-    UCB1CTLW0 &= ~UCTR;             // RX mode
+    UCB1CTLW0 |= UCTR;              // TX mode (clear for RX)
     UCB1CTLW0 &= ~UCSWRST;          // Take out of software reset
 
-    UCB1IE |= UCRXIE0;              // Enable RX interrupt
+    //UCB1IE |= UCRXIE0;              // Enable RX interrupt
+}
+
+// Integer send function (for led bar)
+void sendInt(unsigned int data) {
+    UCB1CTLW0 |= UCTR;                      // TX mode
+
+    while (UCB1CTLW0 & UCTXSTP);            // Wait for STOP if needed
+    UCB1I2CSA = MSP_ADDR;                   // Slave address
+
+    UCB1TBCNT = 1;                          // Transmit 1 byte
+    UCB1CTLW0 |= UCTXSTT;                   // Generate START
+
+    while (!(UCB1IFG & UCTXIFG0));          // Wait for TX buffer ready
+    UCB1TXBUF = data;                       // Send data
+
+    while (UCB1CTLW0 & UCTXSTP);            // Wait for STOP to finish
 }
 
 #pragma vector = EUSCI_B1_VECTOR
@@ -356,6 +373,7 @@ void updateAngle(float angle) {
         message[17] = tens+48;
         message[18] = ones+48;
         message[20] = tenths+48;
+        sendInt(100*hundreds+10*tens+ones);
     }
     message[19] = '.';      // Decimal place
     message[21] = 223;      // Degree symbol
