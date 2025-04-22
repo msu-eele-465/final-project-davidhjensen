@@ -18,6 +18,11 @@ void setupDriver();                             // Setup motor driver with enabl
 void setupPWM();                                // Setup hardware PWM on pin <TODO: pin>
 int pwm_duty = 0;                               // Global to hold current PWM duty
 
+//-- CONTROL TIMER
+void setupSampleClock();                        // Setup clock on TB3 to sample ADC every 0.5s
+void enableSampleClock();                       // Enable sampling clock interrupts
+void disableSampleClock();                      // Disable sampling clock interrupts
+
 //-- CONTROL LOOP
 typedef struct {                                // 2-state system with 1 input
     float A[2][2];  // 2x2 matrix
@@ -102,6 +107,9 @@ int main(void) {
     //-- PWM
     setupPWM();
 
+    //-- CONTROL TIMER
+    setupSampleClock();
+
     //-- CONTROL LOOP
     setupControl();
 
@@ -136,6 +144,7 @@ void setupEncoder() {
 
 float getAngle() {
     // TODO: convert current angle from encoder
+    return 270.0f*3.1415f/180.0f;
 }
     // TODO: add ISR for change in encoder pins here
 
@@ -150,6 +159,33 @@ void setupPWM(){
 }
 
     // TODO: add ISR for the PWM with a way to update duty based on pwm_duty
+
+//-- SAMPLING TIMER
+void setupSampleClock() {
+    TB3CTL |= TBCLR;                            // reset settings
+    TB3CTL |= TBSSEL__ACLK | MC__UP | ID__8;    // 32.768 kHz / 8 = 4096
+    TB3CCR0 = 31;                               // 128 Hz
+    TB3CCTL0 &= ~CCIE;                          // Disable capture compare
+    TB3CCTL0 &= ~CCIFG;                         // Clear IFG
+}
+
+void enableSampleClock() {
+    TB3CCTL0 |= CCIE;                           // Enable capture compare
+    TB3CCTL0 &= ~CCIFG;                         // Clear IFG
+}
+
+void disableSampleClock() {
+    TB3CCTL0 &= ~CCIE;                          // Disable capture compare
+    TB3CCTL0 &= ~CCIFG;                         // Clear IFG
+}
+
+#pragma vector = TIMER3_B0_VECTOR
+__interrupt void ISR_TB0_CCR0(void)
+{
+    updateSystems(angle*3.1415f/180.0f);
+    // clear CCR0 IFG
+    TB3CCTL0 &= ~CCIFG;
+}
 
 //-- CONTROL LOOP
 void setupControl() {
