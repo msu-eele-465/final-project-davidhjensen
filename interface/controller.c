@@ -22,8 +22,10 @@ int pwm_duty = 0;                               // Global to hold current PWM du
 void setupControl();                            // Setup timer to drive control calculations
 
 //-- I2C
-void setupI2C();                                // Setup I2C with SCL on __ and SDA on <TODO: pins>
-void rxCommand();                               // Receive a command from the master
+void setupI2C();                                // Setup I2C with SCL on P1.3 and SDA on P1.2
+volatile unsigned int temp_angle = 0;           // Angle received over I2C (one byte at a time)
+volatile unsigned int angle = 0;                // Angle received over I2C
+volatile unsigned int byte_n = 0;               // Keep track of byte number received
 
 //-- STATE MACHINE
 
@@ -79,6 +81,9 @@ void setupEncoder() {
     // TODO: add ISR for change in encoder pins here
 
 //-- MOTOR DRIVER
+void setupDriver() {
+    // TODO: setup motor driver
+}
 
 //-- PWM
 void setupPWM(){
@@ -95,12 +100,37 @@ void setupControl() {
 
 //-- I2C
 void setupI2C() {
-    // TODO: Setup I2C with SCL on __ and SDA on <TODO: pins>
+    UCB0CTLW0 |= UCSWRST;       // Software reset
+
+    // Configure pins P1.2 (SDA) and P1.3 (SCL)
+    P1SEL1 &= ~(BIT2 | BIT3);   // Clear bits in SEL1
+    P1SEL0 |= (BIT2 | BIT3);    // Set bits in SEL0
+
+    UCB0CTLW0 = UCSWRST | UCMODE_3 | UCSYNC;   // I2C mode, sync, hold in reset
+    UCB0CTLW0 &= ~UCMST;        // Slave mode
+    UCB0I2COA0 = 0x68 | UCOAEN; // Own address + enable
+    UCB0CTLW1 = 0;              // No auto STOP
+    UCB0CTLW0 &= ~UCTR;         // Receiver mode
+
+    UCB0CTLW0 &= ~UCSWRST;      // Exit reset
+
+    UCB0IE |= UCRXIE0;          // Enable receive interrupt
 }
-void rxCommand() {
-    // Receive a command from the master
+
+// I2C Interrupt Service Routine
+#pragma vector=EUSCI_B0_VECTOR
+__interrupt void EUSCI_B0_I2C_ISR(void) {
+
+    if (byte_n==0) {
+        temp_angle = UCB0RXBUF << 8;
+        byte_n++;
+    } else {
+        temp_angle += UCB0RXBUF;
+        angle = temp_angle;
+        byte_n = 0;
+    }
 }
-    // TODO: I2C ISRs as needed here
+
 
 //-- STATE MACHINE
 

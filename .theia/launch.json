@@ -9,6 +9,15 @@
                 "name": "interface",
                 "resourceId": "/interface"
             }
+        },
+        {
+            "name": "controller",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "controller",
+                "resourceId": "/controller"
+            }
         }
     ]
 }
