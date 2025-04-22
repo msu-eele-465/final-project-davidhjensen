@@ -38,7 +38,7 @@ float y_prev = 0.0f;            // Previous angle from encoder
 float v = 0.0f;                 // Velocity from backwards difference
 float v_filtered = 0.0f;        // Filtered velocity
 void setupControl();                            // Setup timer to drive control calculations
-void updateSystems(int);                        // Update all models
+void updateSystems(float);                      // Update all models
 DiscreteSystem2x1 model = {                     // Model
     .A = {
         {0.9988f, 0.00975f},
@@ -134,6 +134,9 @@ void setupEncoder() {
     // TODO: setup encoder on pins and add hardware interrupts for a change
 }
 
+float getAngle() {
+    // TODO: convert current angle from encoder
+}
     // TODO: add ISR for change in encoder pins here
 
 //-- MOTOR DRIVER
@@ -153,9 +156,9 @@ void setupControl() {
     // TODO: setup timer to drive control updates
 }
 
-void updateSystems(int uc) {
+void updateSystems(float uc) {
     // Read actual plant output from encoder (user-defined function)
-    // TODO: convert current angle from encoder
+    y_measured = getAngle();                // Get current angle from encoder
     v = (y_measured - y_prev) / Ts;         // Derivative
     y_prev = y_measured;
 
@@ -168,6 +171,9 @@ void updateSystems(int uc) {
 
     // Control signal: u = theta1 * (uc - y) - theta2 * v_filtered
     float u = theta1 * ((float) uc - y_measured) - theta2 * v_filtered;
+
+    // Apply control signal to motor (user-defined function)
+    // TODO: PWM duty to motors
 
     // --- Update Reference Model ---
     float x1m = model.x[0];
@@ -192,8 +198,7 @@ void updateSystems(int uc) {
     theta1 -= gamma * spt1.x[0] * error;
     theta2 -= gamma * spt2.x[0] * error;
 
-    // Apply control signal to motor (user-defined function)
-    // TODO: PWM duty to motors
+    // TODO: send current states over UART
 }
 
     // TODO: add ISR for timer where control output is calculated and states are updated.
