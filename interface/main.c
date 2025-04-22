@@ -50,6 +50,8 @@ void lcd_clear();                                       // INTERNAL
 //-- STATE MACHINE
 // STATE:
         // 0    Main Menu
+        // 1    Experiment
+        // 2    Command follow based on POT
 int state = 0;
 //----------------------------------------------END SETUP----------------------------------------------
 
@@ -75,8 +77,7 @@ int main(void) {
 
     //-- LCD
     lcd_init();  
-    message[14] = 223;                                     // set degree symbol character in first row
-    message[30] = 223;                                     // set degree symbol character in second row          
+    memcpy(&message[0], "Select Function ", 16);            // update message for LCD
     lcd_display_message(message);
 
     //-- STATE MACHINE
@@ -104,26 +105,30 @@ int main(void) {
 
                 // start experiment
                 if (key_val == '1') {
-                    // TODO: update LCD
+                    state = 1;
+                    memcpy(&message[0], "Starting Expmnt ", 16);    // update message for LCD
+                    lcd_display_message(message);                   // update LCD
                     // TODO: send command to slave MSP to start experiment
-                    // TODO: wait for experiment to finish & display results
-                    lcd_display_message(message);           // display message
+                    __delay_cycles(1e6);                            // wait for experiment to finish & display results
+                    memcpy(&message[0], "Expmnt Finished ", 16);    // update message for LCD
+                    lcd_display_message(message);                   // update LCD
                     // TODO: send command to slave MSP to idle
-                    state = 0;
                 }
 
                 // command following mode
                 if (key_val == '2') {
-                    state = 1;
-                    // TODO: update LCD
+                    state = 2;
+                    memcpy(&message[0], "Cmd Follow: POT ", 16);    // update message for LCD
+                    lcd_display_message(message);                   // update LCD
                     // TODO: send command to slave MSP to start command following
-                    // TODO: sampling timer (reads ADC, updates LCD, sends angle)
+                    // TODO: enable sampling timer (reads ADC, updates LCD, sends angle)
                 }
 
-            } else if (state == 1) {
-                // logic for inputing window size
+            } else if ((state == 1) | (state == 2)) {
                 if (key_val == '*') {
                     state = 0;
+                    memcpy(&message[0], "Select Function ", 16);    // update message for LCD
+                    lcd_display_message(message);                   // update LCD
                     // TODO: send command to slave MSP to idle
                     // TODO: stop sampling timer (reads ADC, updates LCD, sends angle)
                 }
