@@ -22,6 +22,8 @@ float adc2angle(int);                       // Convert ADC code to float [0, 1]
 
 //-- SAMPLING TIMER
 void setupSampleClock();                    // Setup clock on TB3 to sample ADC every 0.5s
+void enableSampleClock();                   // Enable sampling clock interrupts
+void disableSampleClock();                  // Disable sampling clock interrupts
 
 //-- I2C MASTER
 volatile uint8_t rx_byte_count = 0;         // Number of bytes received
@@ -39,6 +41,7 @@ void setupI2C();                            // Setup I2C on P4.6 (SDA) and P4.7 
 char message[] = "                                ";   // 33 characters long, 16 first row, 16 top row, \0
 void lcd_init();                            // Initialize the LCD display
 void lcd_display_message(char *str);        // Display a 32 character message
+void updateAngle(float angle);              // Update angle in bottom left [16-21]
 void delay(unsigned int count);                         // INTERNAL
 void lcd_enable_pulse();                                // INTERNAL
 void lcd_write_command(unsigned char cmd);              // INTERNAL
@@ -77,7 +80,7 @@ int main(void) {
 
     //-- LCD
     lcd_init();  
-    memcpy(&message[0], "Select Function ", 16);            // update message for LCD
+    memcpy(&message[0], "Select Function                 ", 32);            // update message for LCD
     lcd_display_message(message);
 
     //-- STATE MACHINE
@@ -121,16 +124,16 @@ int main(void) {
                     memcpy(&message[0], "Cmd Follow: POT ", 16);    // update message for LCD
                     lcd_display_message(message);                   // update LCD
                     // TODO: send command to slave MSP to start command following
-                    // TODO: enable sampling timer (reads ADC, updates LCD, sends angle)
+                    enableSampleClock();                           // enable sampling timer (reads ADC, updates LCD, TODO: sends angle)
                 }
 
             } else if ((state == 1) | (state == 2)) {
                 if (key_val == '*') {
                     state = 0;
-                    memcpy(&message[0], "Select Function ", 16);    // update message for LCD
+                    disableSampleClock();                           // enable sampling timer (reads ADC, updates LCD, TODO: sends angle)
+                    memcpy(&message[0], "Select Function                 ", 32);            // update message for LCD
                     lcd_display_message(message);                   // update LCD
                     // TODO: send command to slave MSP to idle
-                    // TODO: stop sampling timer (reads ADC, updates LCD, sends angle)
                 }
             
             } else {
@@ -273,14 +276,31 @@ float adc2angle(int code) {
 void setupSampleClock() {
     TB3CTL |= TBCLR;                            // reset settings
     TB3CTL |= TBSSEL__ACLK | MC__UP | ID__8;    // 32.768 kHz / 8 = 4096 / 2 - 1 = 2047
-    TB3CCR0 = 2047;                             // period of .5s
+    TB3CCR0 = 127;                              // 32 Hz
+    TB3CCTL0 &= ~CCIE;                          // Disable capture compare
+    TB3CCTL0 &= ~CCIFG;                         // Clear IFG
+}
+
+void enableSampleClock() {
     TB3CCTL0 |= CCIE;                           // Enable capture compare
+    TB3CCTL0 &= ~CCIFG;                         // Clear IFG
+}
+
+void disableSampleClock() {
+    TB3CCTL0 &= ~CCIE;                          // Disable capture compare
     TB3CCTL0 &= ~CCIFG;                         // Clear IFG
 }
 
 #pragma vector = TIMER3_B0_VECTOR
 __interrupt void ISR_TB0_CCR0(void)
 {
+    readADC();                                  // Start ADC conversion
+    while(!(ADCIFG & ADCIFG0));                 // Wait for ADC conversion to finsih
+    float angle = adc2angle(adc_val);           // Convert to angle
+    updateAngle(angle);                         // Update LCD message
+    lcd_display_message(message);               // Update LCD
+    // TODO: send angle to slave MSP
+
     // clear CCR0 IFG
     TB3CCTL0 &= ~CCIFG;
 }
@@ -320,6 +340,27 @@ __interrupt void EUSCI_B1_ISR(void) {
 //-- SLAVE MSP
 
 //-- LCD
+void updateAngle(float angle) {
+    if ((angle>270.0) | (angle<0.0)) {
+        message[16] = 'x';
+        message[17] = 'x';
+        message[18] = 'x';
+        message[20] = 'x';
+    } else {
+        unsigned int n = (int) (angle*10);
+        unsigned int hundreds = n / 1000;
+        unsigned int tens = (n - 1000*hundreds) / 100;
+        unsigned int ones = (n-1000*hundreds-100*tens) / 10;
+        unsigned int tenths = n-1000*hundreds-100*tens-10*ones;
+        message[16] = hundreds+48;
+        message[17] = tens+48;
+        message[18] = ones+48;
+        message[20] = tenths+48;
+    }
+    message[19] = '.';      // Decimal place
+    message[21] = 223;      // Degree symbol
+}
+
 void delay(unsigned int count) {
     while(count--) __delay_cycles(1000);
 }
