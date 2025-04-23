@@ -164,12 +164,46 @@ float getAngle() {
 
 //-- MOTOR DRIVER
 void setupDriver() {
-    // TODO: setup motor driver
+    P3DIR |= BIT1 | BIT5;       // Set P3.1 and P3.5 as outputs
+    P3OUT &= ~(BIT1 | BIT5);    // Clear outputs
+}
+
+void v2pwm(float v) {
+    // Limit voltage to ±12V
+    if (v > 12.0) v = 12.0;
+    if (v < -12.0) v = -12.0;
+
+    unsigned int pwm_val;
+
+    // Set direction and calculate PWM value
+    if (v >= 0) {
+        // Forward direction: set enable pins accordingly
+        P3OUT |= BIT1;    // Example: P1.0 high for forward
+        P3OUT &= ~BIT5;   // Example: P1.1 low
+        pwm_val = (unsigned int)(v * (99.0 / 12.0) + 0.5); // Round to nearest int
+    } else {
+        // Reverse direction: set enable pins accordingly
+        P3OUT &= ~BIT1;   // P1.0 low for reverse
+        P3OUT |= BIT5;    // P1.1 high
+        pwm_val = (unsigned int)((-v) * (99.0 / 12.0) + 0.5);
+    }
+
+    // Clamp PWM value to 0-99 (just in case)
+    if (pwm_val > 99) pwm_val = 99;
+
+    // Set PWM duty cycle
+    TB0CCR1 = pwm_val;
 }
 
 //-- PWM
 void setupPWM(){
-    // TODO: setup hardware PWM on a different clock than the control loop
+    TB0CCR0 = 100-1;                                // PWM Period
+    TB0CCTL1 = OUTMOD_7;                            // CCR1 reset/set
+    TB0CCR1 = 0;                                    // CCR1 PWM duty cycle
+    TB0CTL = TBSSEL_1 | MC_1 | TBCLR;               // ACLK, up mode, clear TAR
+    P1DIR |= BIT6;                                  // P1.1 output
+    P1SEL1 |= BIT6;                                 // P1.1 option select
+    P1SEL0 &= !BIT6;                                // P1.1 option select
 }
 
     // TODO: add ISR for the PWM with a way to update duty based on pwm_duty
@@ -223,7 +257,7 @@ void updateSystems(float uc) {
     float u = theta1 * ((float) uc - y_measured) - theta2 * v_filtered;
 
     // Apply control signal to motor (user-defined function)
-    // TODO: PWM duty to motors
+    v2pwm(u);
 
     // --- Update Reference Model ---
     float x1m = model.x[0];
@@ -263,8 +297,6 @@ void updateSystems(float uc) {
     UCA1TXBUF = message[0];     // Start message at beginning
     UCA1IE |= UCTXCPTIE;        // Enable interrupt
 }
-
-    // TODO: add ISR for timer where control output is calculated and states are updated.
 
 //-- I2C
 void setupI2C() {
