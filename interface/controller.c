@@ -7,9 +7,9 @@
 //------------------------------------------------SETUP------------------------------------------------
 //-- ENCODER
 void setupEncoder();                            // Setup encoder inputs on <TODO: pins> as an interrupt on change
-int p1_prev = 0;                                // Previous state of encoder channel 1
-int p2_prev = 0;                                // Previous state of encoder channel 2
-int encoder_cnt = 0;                            // Encoder count
+float getAngle();                               // Convert current encoder count to angle in degrees
+volatile int prev = 0;                          // Previous state of encoder
+volatile int encoder_cnt = 0;                   // Encoder count
 
 //-- MOTOR DRIVER
 void setupDriver();                             // Setup motor driver with enable pins on <TODO: pins> and PWM on <TODO: pin>
@@ -154,6 +154,40 @@ int main(void) {
 //-- ENCODER
 void setupEncoder() {
     // TODO: setup encoder on pins and add hardware interrupts for a change
+    P3DIR &= ~(BIT2 | BIT3);        // Inputs on P3.2 and P3.3
+    P3SEL1 &= ~(BIT2 | BIT3);       // Clear SEL1 to allow for interrupts on P3.2 and P3.3
+    P3SEL0 &= ~(BIT2 | BIT3);       // Clear SEL0 to allow for interrupts on P3.2 and P3.3
+    P3IES &= ~(BIT2 | BIT3);        // Set sensitivity to RISING edge initally
+    P3IFG &= ~(BIT2 | BIT3);        // clear flags
+    P3IE |= (BIT2 | BIT3);          // Enable interrupts   
+}
+
+#pragma vector = PORT3_VECTOR
+__interrupt void ISR_P3_ENCODER(void)
+{
+    switch (__even_in_range(P3IV, P3IV_P3IFG7)) {
+        case P3IV_P3IFG2:
+        case P3IV_P3IFG3:
+            {
+            int MSB = (P3IN & BIT2) >> 2;               // Read P3.2
+            int LSB = (P3IN & BIT3) >> 3;               // Read P3.3
+
+            int encoded = (MSB << 1) | LSB;             // Convert to number
+            int sum = (prev << 2) | encoded;    // Add to previous encoder value 
+
+            // Update encoder count
+            if(sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) encoder_cnt ++; 
+            if(sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) encoder_cnt --; 
+            prev = encoded;                     //store this value for next time 
+
+            // Update sensitivities
+            if (MSB) P3IES |= BIT2;                     // Set to falling-edge sensitive if it is high
+            else P3IES &= ~BIT2;                        // Set to rising-edge sensitive if it is low
+            if (LSB) P3IES |= BIT3;                     // Set to falling-edge sensitive if it is high
+            else P3IES &= ~BIT3;                        // Set to rising-edge sensitive if it is low
+            break;
+            }
+    }
 }
 
 float getAngle() {
