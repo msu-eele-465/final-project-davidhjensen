@@ -88,6 +88,12 @@ volatile unsigned int temp_angle = 0;           // Angle received over I2C (one 
 volatile unsigned int angle = 0;                // Angle received over I2C
 volatile unsigned int byte_n = 0;               // Keep track of byte number received
 
+//-- UART
+void setupUART();                               // Setup UART with baud rate of 115200 on USB output
+void addFloat(unsigned int, float);             // Write a float to messsage starting at index i (7 chars: XXXX.XX)    
+volatile unsigned int i_uart = 0;               // Index of byte in message to send
+char message[] = ".......,.......,.......,.......,.......,.......,.......,.......\n\r";      // Message to send over UART
+
 //-- STATE MACHINE
 
 //----------------------------------------------END SETUP----------------------------------------------
@@ -116,6 +122,12 @@ int main(void) {
     //-- I2C
     setupI2C();
 
+    //-- UART
+    setupUART();
+    //message[64] = 0x0D;                             // End in carraige return
+    addFloat(0, 123.45f);
+    addFloat(8, -678.90f);
+
     //-- STATE MACHINE
 
     //----------------------------------------------END INITIALIZATIONS----------------------------------------------
@@ -128,6 +140,8 @@ int main(void) {
     PMM_unlockLPM5();
 
     //------------------------------------------------STATE MACHINE------------------------------------------------
+    // TODO: for testing, put this as a mode that can be toggled
+    enableSampleClock();
     while(1)
     {
 
@@ -164,7 +178,7 @@ void setupPWM(){
 void setupSampleClock() {
     TB3CTL |= TBCLR;                            // reset settings
     TB3CTL |= TBSSEL__ACLK | MC__UP | ID__8;    // 32.768 kHz / 8 = 4096
-    TB3CCR0 = 31;                               // 128 Hz
+    TB3CCR0 = 2047;                               // 128 Hz = 32-1
     TB3CCTL0 &= ~CCIE;                          // Disable capture compare
     TB3CCTL0 &= ~CCIFG;                         // Clear IFG
 }
@@ -235,6 +249,19 @@ void updateSystems(float uc) {
     theta2 -= gamma * spt2.x[0] * error;
 
     // TODO: send current states over UART
+    addFloat(0, y_measured);
+    addFloat(8, v_filtered);
+    addFloat(16, x1m);
+    addFloat(24, x2m);
+    addFloat(32, error);
+    addFloat(40, u);
+    addFloat(48, theta1);
+    addFloat(56, theta2);
+
+    i_uart = 0;                 // Reset message index
+    UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
+    UCA1TXBUF = message[0];     // Start message at beginning
+    UCA1IE |= UCTXCPTIE;        // Enable interrupt
 }
 
     // TODO: add ISR for timer where control output is calculated and states are updated.
@@ -272,6 +299,61 @@ __interrupt void EUSCI_B0_I2C_ISR(void) {
     }
 }
 
+//-- UART
+void setupUART() {
+    UCA1CTLW0 |= UCSWRST;           // Reset
+    UCA1CTLW0 |= UCSSEL__SMCLK;     // Use 1M clock
+    UCA1BRW = 8;                    // Set to low freq baud rate mode (divides by 8)
+    UCA1MCTLW |= 0xD600;            // Gets really close to 115200
+    P4SEL1 &= ~BIT3;                // Config P4.3 to use UCATDX
+    P4SEL0 |= BIT3;                 // Config P4.3 to use UCATDX
+    UCA1CTLW0 &= ~UCSWRST;          // Take out of software reset
+}
+
+void addFloat(unsigned int i, float num) {
+    if ((num>=1000.0) | (num<=-1000.0)) {
+        message[i] = '+';
+        message[i+1] = 'x';
+        message[i+2] = 'x';
+        message[i+3] = 'x';
+        message[i+4] = '.';
+        message[i+5] = 'x';
+        message[i+6] = 'x';
+    } else {
+        if (num>=0) {
+            message[i] = '+';
+        } else {
+            message[i] = '-';
+            num *= -1;
+        }
+        unsigned long n = (unsigned long)(num * 100);
+        unsigned int hundreds = n / 10000;
+        unsigned int tens = (n % 10000) / 1000;
+        unsigned int ones = (n % 1000) / 100;
+        unsigned int tenths = (n % 100) / 10;
+        unsigned int hundredths = n % 10;
+
+        message[i+1] = hundreds + '0';
+        message[i+2] = tens + '0';
+        message[i+3] = ones + '0';
+        message[i+5] = tenths + '0';
+        message[i+6] = hundredths + '0';
+    }
+}
+
+#pragma vector=EUSCI_A1_VECTOR
+__interrupt void ISR_EUSCI_A1(void)
+{
+    // If message sent or space is reached, disable TX interrupts
+    if(message[i_uart+1] == ' ' || i_uart == sizeof(message) - 1) {
+        UCA1IE &=~ UCTXCPTIE;
+    }
+    else {
+        i_uart++;                     // Inc position and transmit
+        UCA1TXBUF = message[i_uart];
+    }
+    UCA1IFG &=~ UCTXCPTIFG;
+}
 
 //-- STATE MACHINE
 
