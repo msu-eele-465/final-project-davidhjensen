@@ -6,16 +6,16 @@
 
 //------------------------------------------------SETUP------------------------------------------------
 //-- ENCODER
-void setupEncoder();                            // Setup encoder inputs on <TODO: pins> as an interrupt on change
+void setupEncoder();                            // Setup encoder inputs on P3.2 (B) and P3.3 (A)
 float getAngle();                               // Convert current encoder count to angle in degrees
 volatile int prev = 0;                          // Previous state of encoder
-volatile int encoder_cnt = 0;                   // Encoder count
+volatile long encoder_cnt = 0;                   // Encoder count
 
 //-- MOTOR DRIVER
-void setupDriver();                             // Setup motor driver with enable pins on <TODO: pins> and PWM on <TODO: pin>
+void setupDriver();                             // Setup motor driver with ENA1 P3.1 and ENA2 on P3.5
 
 //-- PWM
-void setupPWM();                                // Setup hardware PWM on pin <TODO: pin>
+void setupPWM();                                // Setup hardware PWM on P1.6
 int pwm_duty = 0;                               // Global to hold current PWM duty
 
 //-- CONTROL TIMER
@@ -36,7 +36,7 @@ typedef struct {                                // 1-state low-pass filter
 } DiscreteLPF;
 float theta1 = 0.0f;            // Adaptive gain 1 (updated by MRAS)
 float theta2 = 0.0f;            // Adaptive gain 2 (updated by MRAS)
-float gamma = .0002f;           // Adaptation gain
+float gamma = 0.1f;             // Adaptation gain
 float Ts = .01;                 // Sampling time
 float y_measured = 0.0f;        // Angle from encoder
 float y_prev = 0.0f;            // Previous angle from encoder
@@ -44,6 +44,7 @@ float v = 0.0f;                 // Velocity from backwards difference
 float v_filtered = 0.0f;        // Filtered velocity
 void setupControl();                            // Setup timer to drive control calculations
 void updateSystems(float);                      // Update all models
+float this_is_uc =  0;                          // Cleans up var when passed to function
 DiscreteSystem2x1 model = {                     // Model
     .A = {
         {0.9988f, 0.00975f},
@@ -191,7 +192,7 @@ __interrupt void ISR_P3_ENCODER(void)
 }
 
 float getAngle() {
-    return encoder_cnt / 28.0 * 2.0 * 0.0031415;
+    return (float) encoder_cnt / 7.0 * 3.1415 / 298.0;
 }
 
 //-- MOTOR DRIVER
@@ -260,7 +261,8 @@ void disableSampleClock() {
 #pragma vector = TIMER3_B0_VECTOR
 __interrupt void ISR_TB0_CCR0(void)
 {
-    updateSystems((float) (((float)angle)*3.1415f/180.0f));
+    this_is_uc = (((float)angle)*3.1415f/180.0f);
+    updateSystems(this_is_uc);
     // clear CCR0 IFG
     TB3CCTL0 &= ~CCIFG;
 }
@@ -284,7 +286,7 @@ void updateSystems(float uc) {
     float error = model.x[0] - y_measured;
 
     // Control signal: u = theta1 * (uc - y) - theta2 * v_filtered
-    float u = 2.0f * ((float) uc - y_measured) - 1.0f * v_filtered;
+    float u = theta1 * ((float) uc - y_measured) - theta2 * v_filtered;
 
     // Apply control signal to motor (user-defined function)
     v2pwm(u);
