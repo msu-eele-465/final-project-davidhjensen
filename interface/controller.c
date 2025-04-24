@@ -36,7 +36,7 @@ typedef struct {                                // 1-state low-pass filter
 } DiscreteLPF;
 float theta1 = 0.0f;            // Adaptive gain 1 (updated by MRAS)
 float theta2 = 0.0f;            // Adaptive gain 2 (updated by MRAS)
-float gamma = 0.1f;             // Adaptation gain
+float gamma = 0.003f;             // Adaptation gain
 float Ts = .01;                 // Sampling time
 float y_measured = 0.0f;        // Angle from encoder
 float y_prev = 0.0f;            // Previous angle from encoder
@@ -45,6 +45,8 @@ float v_filtered = 0.0f;        // Filtered velocity
 void setupControl();                            // Setup timer to drive control calculations
 void updateSystems(float);                      // Update all models
 float this_is_uc =  0;                          // Cleans up var when passed to function
+float hardcoded_angle[] = {0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 165, 150, 135, 120, 105, 90, 75, 60, 45, 30, 15};
+int hardcode_i = 0;
 DiscreteSystem2x1 model = {                     // Model
     .A = {
         {0.9988f, 0.00975f},
@@ -192,7 +194,7 @@ __interrupt void ISR_P3_ENCODER(void)
 }
 
 float getAngle() {
-    return (float) encoder_cnt / 7.0 * 3.1415 / 298.0;
+    return (float) encoder_cnt / 7.0 * 2 * 3.1415 / 150.0;
 }
 
 //-- MOTOR DRIVER
@@ -261,7 +263,8 @@ void disableSampleClock() {
 #pragma vector = TIMER3_B0_VECTOR
 __interrupt void ISR_TB0_CCR0(void)
 {
-    this_is_uc = (((float)angle)*3.1415f/180.0f);
+    hardcode_i = (hardcode_i + 1) % 120;
+    this_is_uc = ((hardcoded_angle[hardcode_i / 5])*3.1415f/180.0f);
     updateSystems(this_is_uc);
     // clear CCR0 IFG
     TB3CCTL0 &= ~CCIFG;
