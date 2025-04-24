@@ -6,16 +6,16 @@
 
 //------------------------------------------------SETUP------------------------------------------------
 //-- ENCODER
-void setupEncoder();                            // Setup encoder inputs on <TODO: pins> as an interrupt on change
-int p1_prev = 0;                                // Previous state of encoder channel 1
-int p2_prev = 0;                                // Previous state of encoder channel 2
-int encoder_cnt = 0;                            // Encoder count
+void setupEncoder();                            // Setup encoder inputs on P3.2 (B) and P3.3 (A)
+float getAngle();                               // Convert current encoder count to angle in degrees
+volatile int prev = 0;                          // Previous state of encoder
+volatile long encoder_cnt = 0;                   // Encoder count
 
 //-- MOTOR DRIVER
-void setupDriver();                             // Setup motor driver with enable pins on <TODO: pins> and PWM on <TODO: pin>
+void setupDriver();                             // Setup motor driver with ENA1 P3.1 and ENA2 on P3.5
 
 //-- PWM
-void setupPWM();                                // Setup hardware PWM on pin <TODO: pin>
+void setupPWM();                                // Setup hardware PWM on P1.6
 int pwm_duty = 0;                               // Global to hold current PWM duty
 
 //-- CONTROL TIMER
@@ -36,7 +36,7 @@ typedef struct {                                // 1-state low-pass filter
 } DiscreteLPF;
 float theta1 = 0.0f;            // Adaptive gain 1 (updated by MRAS)
 float theta2 = 0.0f;            // Adaptive gain 2 (updated by MRAS)
-float gamma = 2.0f;             // Adaptation gain
+float gamma = 0.1f;             // Adaptation gain
 float Ts = .01;                 // Sampling time
 float y_measured = 0.0f;        // Angle from encoder
 float y_prev = 0.0f;            // Previous angle from encoder
@@ -44,6 +44,7 @@ float v = 0.0f;                 // Velocity from backwards difference
 float v_filtered = 0.0f;        // Filtered velocity
 void setupControl();                            // Setup timer to drive control calculations
 void updateSystems(float);                      // Update all models
+float this_is_uc =  0;                          // Cleans up var when passed to function
 DiscreteSystem2x1 model = {                     // Model
     .A = {
         {0.9988f, 0.00975f},
@@ -84,8 +85,8 @@ DiscreteLPF vlpf = {                            // Low-pass velocity filter
 
 //-- I2C
 void setupI2C();                                // Setup I2C with SCL on P1.3 and SDA on P1.2
-volatile unsigned int temp_angle = 0;           // Angle received over I2C (one byte at a time)
-volatile unsigned int angle = 0;                // Angle received over I2C
+volatile int temp_angle = 0;                    // Angle received over I2C (one byte at a time)
+volatile int angle = 180;                       // Angle received over I2C
 volatile unsigned int byte_n = 0;               // Keep track of byte number received
 
 //-- UART
@@ -102,6 +103,10 @@ int main(void) {
 
     // Stop watchdog timer
     WDT_A_hold(WDT_A_BASE);
+
+    // Disable the GPIO power-on default high-impedance mode
+    // to activate previously configured port settings
+    PMM_unlockLPM5();
 
     //------------------------------------------------INITIALIZATIONS------------------------------------------------
     //-- ENCODER
@@ -135,10 +140,6 @@ int main(void) {
     // enable interrupts
     __enable_interrupt();
 
-    // Disable the GPIO power-on default high-impedance mode
-    // to activate previously configured port settings
-    PMM_unlockLPM5();
-
     //------------------------------------------------STATE MACHINE------------------------------------------------
     // TODO: for testing, put this as a mode that can be toggled
     enableSampleClock();
@@ -154,13 +155,45 @@ int main(void) {
 //-- ENCODER
 void setupEncoder() {
     // TODO: setup encoder on pins and add hardware interrupts for a change
+    P3DIR &= ~(BIT2 | BIT3);        // Inputs on P3.2 and P3.3
+    P3SEL1 &= ~(BIT2 | BIT3);       // Clear SEL1 to allow for interrupts on P3.2 and P3.3
+    P3SEL0 &= ~(BIT2 | BIT3);       // Clear SEL0 to allow for interrupts on P3.2 and P3.3
+    P3IES &= ~(BIT2 | BIT3);        // Set sensitivity to RISING edge initally
+    P3IFG &= ~(BIT2 | BIT3);        // clear flags
+    P3IE |= (BIT2 | BIT3);          // Enable interrupts   
+}
+
+#pragma vector = PORT3_VECTOR
+__interrupt void ISR_P3_ENCODER(void)
+{
+    switch (__even_in_range(P3IV, P3IV_P3IFG7)) {
+        case P3IV_P3IFG2:
+        case P3IV_P3IFG3:
+            {
+            int MSB = (P3IN & BIT2) >> 2;               // Read P3.2
+            int LSB = (P3IN & BIT3) >> 3;               // Read P3.3
+
+            int encoded = (MSB << 1) | LSB;             // Convert to number
+            int sum = (prev << 2) | encoded;    // Add to previous encoder value 
+
+            // Update encoder count
+            if(sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) encoder_cnt ++; 
+            if(sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) encoder_cnt --; 
+            prev = encoded;                     //store this value for next time 
+
+            // Update sensitivities
+            if (MSB) P3IES |= BIT2;                     // Set to falling-edge sensitive if it is high
+            else P3IES &= ~BIT2;                        // Set to rising-edge sensitive if it is low
+            if (LSB) P3IES |= BIT3;                     // Set to falling-edge sensitive if it is high
+            else P3IES &= ~BIT3;                        // Set to rising-edge sensitive if it is low
+            break;
+            }
+    }
 }
 
 float getAngle() {
-    // TODO: convert current angle from encoder
-    return 270.0f*3.1415f/180.0f;
+    return (float) encoder_cnt / 7.0 * 3.1415 / 298.0;
 }
-    // TODO: add ISR for change in encoder pins here
 
 //-- MOTOR DRIVER
 void setupDriver() {
@@ -178,13 +211,13 @@ void v2pwm(float v) {
     // Set direction and calculate PWM value
     if (v >= 0) {
         // Forward direction: set enable pins accordingly
-        P3OUT |= BIT1;    // Example: P1.0 high for forward
-        P3OUT &= ~BIT5;   // Example: P1.1 low
+        P3OUT |= BIT1;    // P3.1 high for forward
+        P3OUT &= ~BIT5;   // P3.5 low
         pwm_val = (unsigned int)(v * (99.0 / 12.0) + 0.5); // Round to nearest int
     } else {
         // Reverse direction: set enable pins accordingly
-        P3OUT &= ~BIT1;   // P1.0 low for reverse
-        P3OUT |= BIT5;    // P1.1 high
+        P3OUT &= ~BIT1;   // P3.1 low for reverse
+        P3OUT |= BIT5;    // P3.5 high
         pwm_val = (unsigned int)((-v) * (99.0 / 12.0) + 0.5);
     }
 
@@ -201,18 +234,16 @@ void setupPWM(){
     TB0CCTL1 = OUTMOD_7;                            // CCR1 reset/set
     TB0CCR1 = 0;                                    // CCR1 PWM duty cycle
     TB0CTL = TBSSEL_1 | MC_1 | TBCLR;               // ACLK, up mode, clear TAR
-    P1DIR |= BIT6;                                  // P1.1 output
-    P1SEL1 |= BIT6;                                 // P1.1 option select
-    P1SEL0 &= !BIT6;                                // P1.1 option select
+    P1DIR |= BIT6;                                  // P1.6 output
+    P1SEL1 |= BIT6;                                 // P1.6 option select
+    P1SEL0 &= !BIT6;                                // P1.6 option select
 }
-
-    // TODO: add ISR for the PWM with a way to update duty based on pwm_duty
 
 //-- SAMPLING TIMER
 void setupSampleClock() {
     TB3CTL |= TBCLR;                            // reset settings
     TB3CTL |= TBSSEL__ACLK | MC__UP | ID__8;    // 32.768 kHz / 8 = 4096
-    TB3CCR0 = 2047;                               // 128 Hz = 32-1
+    TB3CCR0 = 41-1;                             // 102.4 Hz = 41-1
     TB3CCTL0 &= ~CCIE;                          // Disable capture compare
     TB3CCTL0 &= ~CCIFG;                         // Clear IFG
 }
@@ -230,7 +261,8 @@ void disableSampleClock() {
 #pragma vector = TIMER3_B0_VECTOR
 __interrupt void ISR_TB0_CCR0(void)
 {
-    updateSystems(angle*3.1415f/180.0f);
+    this_is_uc = (((float)angle)*3.1415f/180.0f);
+    updateSystems(this_is_uc);
     // clear CCR0 IFG
     TB3CCTL0 &= ~CCIFG;
 }
@@ -282,20 +314,20 @@ void updateSystems(float uc) {
     theta1 -= gamma * spt1.x[0] * error;
     theta2 -= gamma * spt2.x[0] * error;
 
-    // TODO: send current states over UART
-    addFloat(0, y_measured);
-    addFloat(8, v_filtered);
-    addFloat(16, x1m);
-    addFloat(24, x2m);
-    addFloat(32, error);
-    addFloat(40, u);
-    addFloat(48, theta1);
-    addFloat(56, theta2);
+    // Send current states over UART
+    //addFloat(0, y_measured);
+    //addFloat(8, v_filtered);
+    //addFloat(16, x1m);
+    //addFloat(24, x2m);
+    //addFloat(32, error);
+    //addFloat(40, u);
+    //addFloat(48, theta1);
+    //addFloat(56, theta2);
 
-    i_uart = 0;                 // Reset message index
-    UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
-    UCA1TXBUF = message[0];     // Start message at beginning
-    UCA1IE |= UCTXCPTIE;        // Enable interrupt
+    //i_uart = 0;                 // Reset message index
+    //UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
+    //UCA1TXBUF = message[0];     // Start message at beginning
+    //UCA1IE |= UCTXCPTIE;        // Enable interrupt
 }
 
 //-- I2C
