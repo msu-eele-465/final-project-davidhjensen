@@ -36,52 +36,51 @@ typedef struct {                                // 1-state low-pass filter
 } DiscreteLPF;
 float theta1 = 0.0f;            // Adaptive gain 1 (updated by MRAS)
 float theta2 = 0.0f;            // Adaptive gain 2 (updated by MRAS)
-float gamma = 0.0025f;             // Adaptation gain
-float Ts = .01;                 // Sampling time
+float gamma = 0.01f;          // Adaptation gain
+float Ts = .0625;               // Sampling time
 float y_measured = 0.0f;        // Angle from encoder
 float y_prev = 0.0f;            // Previous angle from encoder
 float v = 0.0f;                 // Velocity from backwards difference
 float v_filtered = 0.0f;        // Filtered velocity
-void setupControl();                            // Setup timer to drive control calculations
 void updateSystems(float);                      // Update all models
 float this_is_uc =  0;                          // Cleans up var when passed to function
 float hardcoded_angle[] = {0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 165, 150, 135, 120, 105, 90, 75, 60, 45, 30, 15};
 int hardcode_i = 0;
 DiscreteSystem2x1 model = {                     // Model
     .A = {
-        {0.9988f, 0.00975f},
-        {-0.2438f, 0.95f}
+        {0.9562f, 0.05281f},
+        {-1.32f, 0.6922f}
     },
-    .B = {0.001229f, 0.2438f},
+    .B = {0.04377f, 1.32f},
     .x = {0.0f, 0.0f}
 };
 DiscreteSystem2x1 plant = {                     // Plant
     .A = {
-        {1.0f, 0.009939f},
-        {0.0f, 0.9877f}
+        {1.0f, 0.06015f},
+        {0.0f, 0.9258f}
     },
-    .B = {0.0002827f, 0.05643f},
+    .B = {0.01081f, 0.3415f},
     .x = {0.0f, 0.0f}
 };
 DiscreteSystem2x1 spt1 = {                      // Theta1 sensitivity partial
     .A = {
-        {0.9988f, 0.00975f},
-        {-0.2438f, 0.95f}
+        {0.9562f, 0.05281f},
+        {-1.32f, 0.6922f}
     },
-    .B = {0.001229f, 0.2438f},
+    .B = {0.04377f, 1.32f},
     .x = {0.0f, 0.0f}
 };
 DiscreteSystem2x1 spt2 = {                      // Theta2 sensitivity partial
     .A = {
-        {0.9988f, 0.00975f},
-        {-0.2438f, 0.95f}
+        {0.9562f, 0.05281f},
+        {-1.32f, 0.6922f}
     },
-    .B = {-0.001229f, -0.2438f},
+    .B = {-0.04377f, -1.32f},
     .x = {0.0f, 0.0f}
 };
 DiscreteLPF vlpf = {                            // Low-pass velocity filter
-    .a = 0.9048f,
-    .b = 0.09516f,
+    .a = 0.5353f,
+    .b = 0.4647f,
     .x = 0.0f
 };
 
@@ -95,7 +94,15 @@ volatile unsigned int byte_n = 0;               // Keep track of byte number rec
 void setupUART();                               // Setup UART with baud rate of 115200 on USB output
 void addFloat(unsigned int, float);             // Write a float to messsage starting at index i (7 chars: XXXX.XX)    
 volatile unsigned int i_uart = 0;               // Index of byte in message to send
-char message[] = ".......,.......,.......,.......,.......,.......,.......,.......\n\r";      // Message to send over UART
+char message[] = ".......,.......\n\r";      // Message to send over UART
+
+//-- MEMORY
+#define N_VALUES 9
+#define N_SAMPLES 1600
+float mem[N_VALUES*N_SAMPLES];
+void sendMemory();                              // Send mem over UART
+int mem_row_index = 0;                          // Index of current "row" to save data in
+//float *mem;                                     // Array to store data in before transmitting via uart
 
 //-- STATE MACHINE
 
@@ -124,7 +131,6 @@ int main(void) {
     setupSampleClock();
 
     //-- CONTROL LOOP
-    setupControl();
 
     //-- I2C
     setupI2C();
@@ -134,6 +140,9 @@ int main(void) {
     //message[64] = 0x0D;                             // End in carraige return
     addFloat(0, 123.45f);
     addFloat(8, -678.90f);
+
+    //-- MEMORY
+    //float *mem = (float*) calloc(sizeof(float), N_VALUES*N_SAMPLES);
 
     //-- STATE MACHINE
 
@@ -194,7 +203,7 @@ __interrupt void ISR_P3_ENCODER(void)
 }
 
 float getAngle() {
-    return (float) encoder_cnt / 7.0 * 2 * 3.1415 / 150.0;
+    return (float) encoder_cnt / 28.0 * 2 * 3.1415 / 150.0;
 }
 
 //-- MOTOR DRIVER
@@ -245,7 +254,7 @@ void setupPWM(){
 void setupSampleClock() {
     TB3CTL |= TBCLR;                            // reset settings
     TB3CTL |= TBSSEL__ACLK | MC__UP | ID__8;    // 32.768 kHz / 8 = 4096
-    TB3CCR0 = 41-1;                             // 102.4 Hz = 41-1
+    TB3CCR0 = 256-1;                            // 16 Hz
     TB3CCTL0 &= ~CCIE;                          // Disable capture compare
     TB3CCTL0 &= ~CCIFG;                         // Clear IFG
 }
@@ -271,9 +280,6 @@ __interrupt void ISR_TB0_CCR0(void)
 }
 
 //-- CONTROL LOOP
-void setupControl() {
-    // TODO: setup timer to drive control updates
-}
 
 void updateSystems(float uc) {
     // Read actual plant output from encoder (user-defined function)
@@ -317,8 +323,8 @@ void updateSystems(float uc) {
     theta1 -= gamma * spt1.x[0] * error;
     theta2 -= gamma * spt2.x[0] * error;
 
-    // Send current states over UART
-    //addFloat(0, y_measured);
+    //-- Send data over uart
+    //addFloat(0, y_measured);      // Update message
     //addFloat(8, v_filtered);
     //addFloat(16, x1m);
     //addFloat(24, x2m);
@@ -326,11 +332,33 @@ void updateSystems(float uc) {
     //addFloat(40, u);
     //addFloat(48, theta1);
     //addFloat(56, theta2);
-
+    //addFloat(64, uc);
     //i_uart = 0;                 // Reset message index
     //UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
     //UCA1TXBUF = message[0];     // Start message at beginning
     //UCA1IE |= UCTXCPTIE;        // Enable interrupt
+
+    // Save data
+    /*
+    mem[mem_row_index+0] = y_measured;
+    mem[mem_row_index+1] = v_filtered;
+    mem[mem_row_index+2] = x1m;
+    mem[mem_row_index+3] = x2m;
+    mem[mem_row_index+4] = error;
+    mem[mem_row_index+5] = u;
+    mem[mem_row_index+6] = theta1;
+    mem[mem_row_index+7] = theta2;
+    mem[mem_row_index+8] = uc;
+    mem_row_index += N_VALUES;
+    
+    // Stop after all data saved
+    if (mem_row_index > N_VALUES*N_SAMPLES-1) {
+        disableSampleClock();
+        P3OUT &= ~(BIT1 | BIT5);    // Stop motor
+        sendMemory();
+    }
+    */
+
 }
 
 //-- I2C
@@ -369,7 +397,7 @@ __interrupt void EUSCI_B0_I2C_ISR(void) {
 //-- UART
 void setupUART() {
     UCA1CTLW0 |= UCSWRST;           // Reset
-    UCA1CTLW0 |= UCSSEL__SMCLK;     // Use 1M clock
+    UCA1CTLW0 |= UCSSEL__SMCLK;     // Use 8M clock
     UCA1BRW = 8;                    // Set to low freq baud rate mode (divides by 8)
     UCA1MCTLW |= 0xD600;            // Gets really close to 115200
     P4SEL1 &= ~BIT3;                // Config P4.3 to use UCATDX
@@ -420,6 +448,28 @@ __interrupt void ISR_EUSCI_A1(void)
         UCA1TXBUF = message[i_uart];
     }
     UCA1IFG &=~ UCTXCPTIFG;
+}
+
+//-- MEMORY
+void sendMemory() {
+
+    mem_row_index = 0;                      // Reset row counter
+    for (mem_row_index; mem_row_index<N_VALUES*N_SAMPLES; mem_row_index+=N_VALUES) {
+        addFloat(0, mem[mem_row_index+0]);      // Update message
+        addFloat(8, mem[mem_row_index+1]);
+        addFloat(16, mem[mem_row_index+2]);
+        addFloat(24, mem[mem_row_index+3]);
+        addFloat(32, mem[mem_row_index+4]);
+        addFloat(40, mem[mem_row_index+5]);
+        addFloat(48, mem[mem_row_index+6]);
+        addFloat(56, mem[mem_row_index+7]);
+        addFloat(64, mem[mem_row_index+8]);
+        i_uart = 0;                 // Reset message index
+        UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
+        UCA1TXBUF = message[0];     // Start message at beginning
+        UCA1IE |= UCTXCPTIE;        // Enable 
+        while (UCA1IE & UCTXCPTIE);  // Wait until ISR disables the interrupt (done sending)
+    }
 }
 
 //-- STATE MACHINE
