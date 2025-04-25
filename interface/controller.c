@@ -36,7 +36,7 @@ typedef struct {                                // 1-state low-pass filter
 } DiscreteLPF;
 float theta1 = 0.0f;            // Adaptive gain 1 (updated by MRAS)
 float theta2 = 0.0f;            // Adaptive gain 2 (updated by MRAS)
-float gamma = 0.01f;          // Adaptation gain
+float gamma = 0.03f;          // Adaptation gain
 float Ts = .0625;               // Sampling time
 float y_measured = 0.0f;        // Angle from encoder
 float y_prev = 0.0f;            // Previous angle from encoder
@@ -203,7 +203,7 @@ __interrupt void ISR_P3_ENCODER(void)
 }
 
 float getAngle() {
-    return (float) encoder_cnt / 28.0 * 2 * 3.1415 / 150.0;
+    return (float) encoder_cnt / 28.0 * 2 * 3.1415 / 150.0 * 2;
 }
 
 //-- MOTOR DRIVER
@@ -272,8 +272,9 @@ void disableSampleClock() {
 #pragma vector = TIMER3_B0_VECTOR
 __interrupt void ISR_TB0_CCR0(void)
 {
-    hardcode_i = (hardcode_i + 1) % 120;
-    this_is_uc = ((hardcoded_angle[hardcode_i / 5])*3.1415f/180.0f);
+    //hardcode_i = (hardcode_i + 1) % 120;
+    //this_is_uc = ((hardcoded_angle[hardcode_i / 5])*3.1415f/180.0f);
+    this_is_uc = (angle*3.1415f/180.0f);
     updateSystems(this_is_uc);
     // clear CCR0 IFG
     TB3CCTL0 &= ~CCIFG;
