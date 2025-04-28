@@ -36,7 +36,7 @@ typedef struct {                                // 1-state low-pass filter
 } DiscreteLPF;
 float theta1 = 0.0f;            // Adaptive gain 1 (updated by MRAS)
 float theta2 = 0.0f;            // Adaptive gain 2 (updated by MRAS)
-float gamma = 0.03f;          // Adaptation gain
+float gamma = 0.025f;          // Adaptation gain
 float Ts = .0625;               // Sampling time
 float y_measured = 0.0f;        // Angle from encoder
 float y_prev = 0.0f;            // Previous angle from encoder
@@ -87,22 +87,14 @@ DiscreteLPF vlpf = {                            // Low-pass velocity filter
 //-- I2C
 void setupI2C();                                // Setup I2C with SCL on P1.3 and SDA on P1.2
 volatile int temp_angle = 0;                    // Angle received over I2C (one byte at a time)
-volatile int angle = 180;                       // Angle received over I2C
+volatile int angle = 0;                       // Angle received over I2C
 volatile unsigned int byte_n = 0;               // Keep track of byte number received
 
 //-- UART
 void setupUART();                               // Setup UART with baud rate of 115200 on USB output
 void addFloat(unsigned int, float);             // Write a float to messsage starting at index i (7 chars: XXXX.XX)    
 volatile unsigned int i_uart = 0;               // Index of byte in message to send
-char message[] = ".......,.......\n\r";      // Message to send over UART
-
-//-- MEMORY
-#define N_VALUES 9
-#define N_SAMPLES 1600
-float mem[N_VALUES*N_SAMPLES];
-void sendMemory();                              // Send mem over UART
-int mem_row_index = 0;                          // Index of current "row" to save data in
-//float *mem;                                     // Array to store data in before transmitting via uart
+char message[] = "XX123412341234123412341234123412341234";      // Message to send over UART
 
 //-- STATE MACHINE
 
@@ -137,12 +129,8 @@ int main(void) {
 
     //-- UART
     setupUART();
-    //message[64] = 0x0D;                             // End in carraige return
-    addFloat(0, 123.45f);
-    addFloat(8, -678.90f);
-
-    //-- MEMORY
-    //float *mem = (float*) calloc(sizeof(float), N_VALUES*N_SAMPLES);
+    message[0] = 0xAA;      // All frames start with this
+    message[1] = 0x55;      // ^^
 
     //-- STATE MACHINE
 
@@ -325,40 +313,19 @@ void updateSystems(float uc) {
     theta2 -= gamma * spt2.x[0] * error;
 
     //-- Send data over uart
-    //addFloat(0, y_measured);      // Update message
-    //addFloat(8, v_filtered);
-    //addFloat(16, x1m);
-    //addFloat(24, x2m);
-    //addFloat(32, error);
-    //addFloat(40, u);
-    //addFloat(48, theta1);
-    //addFloat(56, theta2);
-    //addFloat(64, uc);
-    //i_uart = 0;                 // Reset message index
-    //UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
-    //UCA1TXBUF = message[0];     // Start message at beginning
-    //UCA1IE |= UCTXCPTIE;        // Enable interrupt
-
-    // Save data
-    /*
-    mem[mem_row_index+0] = y_measured;
-    mem[mem_row_index+1] = v_filtered;
-    mem[mem_row_index+2] = x1m;
-    mem[mem_row_index+3] = x2m;
-    mem[mem_row_index+4] = error;
-    mem[mem_row_index+5] = u;
-    mem[mem_row_index+6] = theta1;
-    mem[mem_row_index+7] = theta2;
-    mem[mem_row_index+8] = uc;
-    mem_row_index += N_VALUES;
-    
-    // Stop after all data saved
-    if (mem_row_index > N_VALUES*N_SAMPLES-1) {
-        disableSampleClock();
-        P3OUT &= ~(BIT1 | BIT5);    // Stop motor
-        sendMemory();
-    }
-    */
+    addFloat(2, y_measured);      // Update message
+    addFloat(6, v_filtered);
+    addFloat(10, x1m);
+    addFloat(14, x2m);
+    addFloat(18, error);
+    addFloat(22, u);
+    addFloat(26, theta1);
+    addFloat(30, theta2);
+    addFloat(34, uc);
+    i_uart = 0;                 // Reset message index
+    UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
+    UCA1TXBUF = message[0];     // Start message at beginning
+    UCA1IE |= UCTXCPTIE;        // Enable interrupt
 
 }
 
@@ -407,34 +374,7 @@ void setupUART() {
 }
 
 void addFloat(unsigned int i, float num) {
-    if ((num>=1000.0) | (num<=-1000.0)) {
-        message[i] = '+';
-        message[i+1] = 'x';
-        message[i+2] = 'x';
-        message[i+3] = 'x';
-        message[i+4] = '.';
-        message[i+5] = 'x';
-        message[i+6] = 'x';
-    } else {
-        if (num>=0) {
-            message[i] = '+';
-        } else {
-            message[i] = '-';
-            num *= -1;
-        }
-        unsigned long n = (unsigned long)(num * 100);
-        unsigned int hundreds = n / 10000;
-        unsigned int tens = (n % 10000) / 1000;
-        unsigned int ones = (n % 1000) / 100;
-        unsigned int tenths = (n % 100) / 10;
-        unsigned int hundredths = n % 10;
-
-        message[i+1] = hundreds + '0';
-        message[i+2] = tens + '0';
-        message[i+3] = ones + '0';
-        message[i+5] = tenths + '0';
-        message[i+6] = hundredths + '0';
-    }
+    memcpy(&message[i], &num,sizeof(float));
 }
 
 #pragma vector=EUSCI_A1_VECTOR
@@ -449,28 +389,6 @@ __interrupt void ISR_EUSCI_A1(void)
         UCA1TXBUF = message[i_uart];
     }
     UCA1IFG &=~ UCTXCPTIFG;
-}
-
-//-- MEMORY
-void sendMemory() {
-
-    mem_row_index = 0;                      // Reset row counter
-    for (mem_row_index; mem_row_index<N_VALUES*N_SAMPLES; mem_row_index+=N_VALUES) {
-        addFloat(0, mem[mem_row_index+0]);      // Update message
-        addFloat(8, mem[mem_row_index+1]);
-        addFloat(16, mem[mem_row_index+2]);
-        addFloat(24, mem[mem_row_index+3]);
-        addFloat(32, mem[mem_row_index+4]);
-        addFloat(40, mem[mem_row_index+5]);
-        addFloat(48, mem[mem_row_index+6]);
-        addFloat(56, mem[mem_row_index+7]);
-        addFloat(64, mem[mem_row_index+8]);
-        i_uart = 0;                 // Reset message index
-        UCA1IFG &=~ UCTXCPTIFG;     // Clear flag
-        UCA1TXBUF = message[0];     // Start message at beginning
-        UCA1IE |= UCTXCPTIE;        // Enable 
-        while (UCA1IE & UCTXCPTIE);  // Wait until ISR disables the interrupt (done sending)
-    }
 }
 
 //-- STATE MACHINE
